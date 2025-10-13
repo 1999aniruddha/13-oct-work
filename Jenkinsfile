@@ -16,18 +16,20 @@ pipeline {
 
     stage('Terraform Init & Apply') {
       steps {
-        withCredentials([[$class: 'UsernamePasswordMultiBinding',
-          credentialsId: 'AWS_CREDS',
-          usernameVariable: 'AWS_ACCESS_KEY_ID',
-          passwordVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+        withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
+                                          usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                          passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
 
           sh '''
             set -e
             cd $TF_DIR
+            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+
             terraform init -input=false
             terraform apply -auto-approve -input=false
+
             terraform output -json > tf_outputs.json
-            # extract public IP
             PUBLIC_IP=$(terraform output -raw public_ip)
             echo "PUBLIC_IP=${PUBLIC_IP}" > ../public_ip.env
           '''
@@ -37,18 +39,17 @@ pipeline {
 
     stage('Ansible Deploy') {
       steps {
-        // Use SSH private key credential; "deploy-key" must be created in Jenkins
         sshagent(['deploy-key']) {
           sh '''
             set -e
-            # load public ip
             source public_ip.env
+
             mkdir -p ansible/inventory
             cat > ansible/inventory/hosts.ini <<EOF
 [webservers]
 ${PUBLIC_IP} ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 EOF
-            # run ansible
+
             ansible-playbook -i ansible/inventory/hosts.ini ansible/site.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
           '''
         }
@@ -67,10 +68,10 @@ EOF
 
   post {
     success {
-      echo 'Pipeline finished successfully.'
+      echo '✅ Pipeline finished successfully.'
     }
     failure {
-      echo 'Pipeline failed. Check logs.'
+      echo '❌ Pipeline failed. Check logs.'
     }
   }
 }
