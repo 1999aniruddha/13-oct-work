@@ -15,27 +15,36 @@ pipeline {
     }
 
     stage('Terraform Init & Apply') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
-                                          usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                          passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+  steps {
+    withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
+                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
 
-          sh '''
-            set -e
-            cd $TF_DIR
-            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+      sh '''
+        set -e
+        cd $TF_DIR
 
-            terraform init -input=false
-            terraform apply -auto-approve -input=false
+        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 
-            terraform output -json > tf_outputs.json
-            PUBLIC_IP=$(terraform output -raw public_ip)
-            echo "PUBLIC_IP=${PUBLIC_IP}" > ../public_ip.env
-          '''
-        }
-      }
+        # Persistent plugin cache (reuses AWS provider between runs)
+        export TF_PLUGIN_CACHE_DIR=/var/terraform-plugin-cache
+        mkdir -p $TF_PLUGIN_CACHE_DIR
+
+        echo "🔧 Using Terraform plugin cache at $TF_PLUGIN_CACHE_DIR"
+
+        terraform init -input=false
+        terraform plan -out=tfplan
+        terraform apply -auto-approve -input=false -parallelism=5
+
+        terraform output -json > tf_outputs.json
+        PUBLIC_IP=$(terraform output -raw public_ip)
+        echo "PUBLIC_IP=${PUBLIC_IP}" > ../public_ip.env
+      '''
     }
+  }
+}
+
 
     stage('Ansible Deploy') {
       steps {
