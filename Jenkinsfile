@@ -28,6 +28,9 @@ pipeline {
                         export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
                         export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 
+                        # 🧹 Clean old Terraform caches to avoid plugin corruption
+                        rm -rf .terraform .terraform.lock.hcl $WORKSPACE/.terraform-plugin-cache
+
                         # Workspace-based Terraform plugin cache
                         export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
                         mkdir -p $TF_PLUGIN_CACHE_DIR
@@ -36,7 +39,10 @@ pipeline {
                         # Enable detailed Terraform logs
                         export TF_LOG_PATH=$WORKSPACE/terraform/terraform.log
 
+                        echo "🚀 Initializing Terraform..."
                         terraform init -input=false
+
+                        echo "🧠 Planning infrastructure changes..."
                         terraform plan -out=tfplan
                     '''
                 }
