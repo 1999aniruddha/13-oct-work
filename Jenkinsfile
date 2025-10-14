@@ -2,77 +2,90 @@ pipeline {
     agent any
 
     environment {
-        AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
-        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
-    }
-
-    options {
-        timeout(time: 60, unit: 'MINUTES')
-        timestamps()
+        TF_DIR = "terraform"
+        ANSIBLE_DIR = "ansible"
+        APP_DIR = "app"
     }
 
     stages {
-        stage('Checkout SCM') {
+        stage('Checkout') {
             steps {
-                wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
-                    echo "🔄 Checking out Git repository..."
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: '*/main']],
-                        userRemoteConfigs: [[
-                            url: 'https://github.com/1999aniruddha/13-oct-work.git',
-                            credentialsId: '2d5db3f3-8f3c-45a1-909e-ce4661dfa659'
-                        ]]
-                    ])
-                }
+                checkout scm
             }
         }
 
         stage('Terraform Init & Apply') {
             steps {
-                wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
-                    dir('terraform') {
-                        echo "⚙️ Initializing Terraform..."
-                        sh 'terraform init -input=false -no-color'
+                // Use usernamePassword style like your working pipeline
+                withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
+                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
+                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    sh '''
+                        set -e
+                        cd $TF_DIR
 
-                        echo "🚀 Applying Terraform..."
-                        sh 'terraform apply -auto-approve -input=false -no-color'
-                    }
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+
+                        # Persistent plugin cache
+                        export TF_PLUGIN_CACHE_DIR=/var/terraform-plugin-cache
+                        mkdir -p $TF_PLUGIN_CACHE_DIR
+                        echo "🔧 Using Terraform plugin cache at $TF_PLUGIN_CACHE_DIR"
+
+                        terraform init -input=false
+                        terraform plan -out=tfplan
+                        terraform apply -auto-approve -input=false -parallelism=5
+
+                        terraform output -json > tf_outputs.json
+                        PUBLIC_IP=$(terraform output -raw public_ip)
+                        echo "PUBLIC_IP=${PUBLIC_IP}" > ../public_ip.env
+                    '''
                 }
             }
         }
 
         stage('Ansible Deploy') {
             steps {
-                wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
-                    echo "📦 Running Ansible deployment..."
-                    dir('ansible') {
-                        sh 'ansible-playbook -i inventory.ini deploy.yml'
-                    }
+                sshagent(['deploy-key']) {
+                    sh '''
+                        set -e
+                        source public_ip.env
+
+                        mkdir -p $ANSIBLE_DIR/inventory
+                        cat > $ANSIBLE_DIR/inventory/hosts.ini <<EOF
+[webservers]
+${PUBLIC_IP} ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+EOF
+
+                        ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
+                    '''
                 }
             }
         }
 
         stage('Report') {
             steps {
-                wrap([$class: 'AnsiColorBuildWrapper', 'colorMapName': 'xterm']) {
-                    echo "📊 Pipeline completed. Generating report..."
-                    sh 'echo "Terraform & Ansible deployment finished successfully!" > report.txt'
-                }
+                sh '''
+                    source public_ip.env
+                    echo "Application should be available at: http://${PUBLIC_IP}"
+                '''
             }
         }
     }
 
     post {
         success {
-            echo "✅ Pipeline finished successfully."
+            echo '✅ Pipeline finished successfully.'
         }
         failure {
-            echo "❌ Pipeline failed. Check logs for details."
+            echo '❌ Pipeline failed. Check logs.'
         }
         always {
-            archiveArtifacts artifacts: '**/report.txt', allowEmptyArchive: true
-            cleanWs()
+            node {
+                // Only archive if file exists
+                archiveArtifacts artifacts: '**/tf_outputs.json, **/public_ip.env', allowEmptyArchive: true
+                cleanWs()
+            }
         }
     }
 }
