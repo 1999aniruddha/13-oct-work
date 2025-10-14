@@ -17,19 +17,20 @@ pipeline {
                                                   usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir(env.TF_DIR) {
-                        sh(script: '''
+                        sh '''
+/bin/bash -c "
 set -euo pipefail
-
 export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
 export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
-mkdir -p "$TF_PLUGIN_CACHE_DIR"
+mkdir -p \\\"$TF_PLUGIN_CACHE_DIR\\\"
 export TF_LOG=INFO
 export TF_LOG_PATH=/dev/stdout
 
-echo "🔧 Initializing Terraform..."
+echo '🔧 Initializing Terraform...'
 terraform init -input=false
-''', shell: '/bin/bash')
+"
+'''
                     }
                 }
             }
@@ -41,25 +42,25 @@ terraform init -input=false
                                                   usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir(env.TF_DIR) {
-                        sh(script: '''
+                        sh '''
+/bin/bash -c "
 set -euo pipefail
-
 export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
 export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
 export TF_LOG=INFO
 export TF_LOG_PATH=/dev/stdout
 
-echo "🧠 Running Terraform Plan..."
-# Run plan in background with heartbeat to prevent Jenkins stale wrapper error
+echo '🧠 Running Terraform Plan...'
 terraform plan -out=tfplan -input=false &
 PLAN_PID=$!
 while kill -0 $PLAN_PID >/dev/null 2>&1; do
-    echo "⏳ Terraform plan still running..."
+    echo '⏳ Terraform plan still running...'
     sleep 20
 done
 wait $PLAN_PID
-''', shell: '/bin/bash')
+"
+'''
                     }
                 }
             }
@@ -72,29 +73,30 @@ wait $PLAN_PID
                                                   usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir(env.TF_DIR) {
-                        sh(script: '''
+                        sh '''
+/bin/bash -c "
 set -euo pipefail
-
 export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
 export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
 export TF_LOG=INFO
 export TF_LOG_PATH=/dev/stdout
 
-echo "🚀 Applying Terraform changes..."
+echo '🚀 Applying Terraform changes...'
 terraform apply -auto-approve -input=false tfplan
 
-echo "📤 Extracting Terraform outputs..."
+echo '📤 Extracting Terraform outputs...'
 terraform output -json > tf_outputs.json || echo '{}' > tf_outputs.json
 
 if terraform output -raw public_ip >/dev/null 2>&1; then
     PUBLIC_IP=$(terraform output -raw public_ip)
-    echo "PUBLIC_IP=${PUBLIC_IP}" > "$WORKSPACE/public_ip.env"
-    echo "✅ Public IP captured: ${PUBLIC_IP}"
+    echo 'PUBLIC_IP=${PUBLIC_IP}' > \"$WORKSPACE/public_ip.env\"
+    echo \"✅ Public IP captured: ${PUBLIC_IP}\"
 else
-    echo "⚠️  No public_ip output found."
+    echo '⚠️  No public_ip output found.'
 fi
-''', shell: '/bin/bash')
+"
+'''
                     }
                 }
             }
@@ -104,7 +106,8 @@ fi
             when { expression { fileExists('public_ip.env') } }
             steps {
                 sshagent(['deploy-key']) {
-                    sh(script: '''
+                    sh '''
+/bin/bash -c "
 set -euo pipefail
 source public_ip.env
 
@@ -114,9 +117,10 @@ cat > $ANSIBLE_DIR/inventory/hosts.ini <<EOF
 ${PUBLIC_IP} ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
 EOF
 
-echo "🚀 Running Ansible playbook on ${PUBLIC_IP}..."
+echo '🚀 Running Ansible playbook on ${PUBLIC_IP}...'
 ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh-common-args='-o StrictHostKeyChecking=no'
-''', shell: '/bin/bash')
+"
+'''
                 }
             }
         }
@@ -124,10 +128,12 @@ ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh
         stage('Report') {
             when { expression { fileExists('public_ip.env') } }
             steps {
-                sh(script: '''
+                sh '''
+/bin/bash -c "
 source public_ip.env
-echo "🌐 Application should be available at: http://${PUBLIC_IP}"
-''', shell: '/bin/bash')
+echo '🌐 Application should be available at: http://${PUBLIC_IP}'
+"
+'''
             }
         }
     }
