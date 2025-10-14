@@ -1,86 +1,72 @@
 pipeline {
-  agent any
+    agent any
 
-  environment {
-    TF_DIR = "terraform"
-    ANSIBLE_DIR = "ansible"
-    APP_DIR = "app"
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
+    environment {
+        AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')      // Replace with your Jenkins credential ID
+        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')  // Replace with your Jenkins credential ID
     }
 
-    stage('Terraform Init & Apply') {
-  steps {
-    withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
-                                      usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                      passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-
-      sh '''
-        set -e
-        cd $TF_DIR
-
-        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-
-        # Persistent plugin cache (reuses AWS provider between runs)
-        export TF_PLUGIN_CACHE_DIR=/var/terraform-plugin-cache
-        mkdir -p $TF_PLUGIN_CACHE_DIR
-
-        echo "🔧 Using Terraform plugin cache at $TF_PLUGIN_CACHE_DIR"
-
-        terraform init -input=false
-        terraform plan -out=tfplan
-        terraform apply -auto-approve -input=false -parallelism=5
-
-        terraform output -json > tf_outputs.json
-        PUBLIC_IP=$(terraform output -raw public_ip)
-        echo "PUBLIC_IP=${PUBLIC_IP}" > ../public_ip.env
-      '''
+    options {
+        timeout(time: 60, unit: 'MINUTES')    // Prevent hanging builds
+        ansiColor('xterm')
+        timestamps()
     }
-  }
-}
 
-
-    stage('Ansible Deploy') {
-      steps {
-        sshagent(['deploy-key']) {
-          sh '''
-            set -e
-            source public_ip.env
-
-            mkdir -p ansible/inventory
-            cat > ansible/inventory/hosts.ini <<EOF
-[webservers]
-${PUBLIC_IP} ansible_user=ubuntu ansible_ssh_common_args='-o StrictHostKeyChecking=no'
-EOF
-
-            ansible-playbook -i ansible/inventory/hosts.ini ansible/site.yml --ssh-extra-args='-o StrictHostKeyChecking=no'
-          '''
+    stages {
+        stage('Checkout SCM') {
+            steps {
+                echo "🔄 Checking out Git repository..."
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/1999aniruddha/13-oct-work.git',
+                        credentialsId: '2d5db3f3-8f3c-45a1-909e-ce4661dfa659'
+                    ]]
+                ])
+            }
         }
-      }
+
+        stage('Terraform Init & Apply') {
+            steps {
+                dir('terraform') {
+                    echo "⚙️ Initializing Terraform..."
+                    sh 'terraform init -input=false -no-color'
+
+                    echo "🚀 Applying Terraform..."
+                    // Run Terraform in a way compatible with Jenkins durable tasks
+                    sh 'terraform apply -auto-approve -input=false -no-color'
+                }
+            }
+        }
+
+        stage('Ansible Deploy') {
+            steps {
+                echo "📦 Running Ansible deployment..."
+                dir('ansible') {
+                    sh 'ansible-playbook -i inventory.ini deploy.yml'
+                }
+            }
+        }
+
+        stage('Report') {
+            steps {
+                echo "📊 Pipeline completed. Generating report..."
+                sh 'echo "Terraform & Ansible deployment finished successfully!" > report.txt'
+            }
+        }
     }
 
-    stage('Report') {
-      steps {
-        sh '''
-          source public_ip.env
-          echo "Application should be available at: http://${PUBLIC_IP}"
-        '''
-      }
+    post {
+        success {
+            echo "✅ Pipeline finished successfully."
+        }
+        failure {
+            echo "❌ Pipeline failed. Check logs for details."
+        }
+        always {
+            archiveArtifacts artifacts: '**/report.txt', allowEmptyArchive: true
+            cleanWs()
+        }
     }
-  }
-
-  post {
-    success {
-      echo '✅ Pipeline finished successfully.'
-    }
-    failure {
-      echo '❌ Pipeline failed. Check logs.'
-    }
-  }
 }
