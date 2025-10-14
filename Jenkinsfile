@@ -16,7 +16,6 @@ pipeline {
 
         stage('Terraform Init & Apply') {
             steps {
-                // Use usernamePassword style like your working pipeline
                 withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
                                                   usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
@@ -27,8 +26,8 @@ pipeline {
                         export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
                         export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 
-                        # Persistent plugin cache
-                        export TF_PLUGIN_CACHE_DIR=/var/terraform-plugin-cache
+                        # Use workspace directory for Terraform plugin cache
+                        export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
                         mkdir -p $TF_PLUGIN_CACHE_DIR
                         echo "🔧 Using Terraform plugin cache at $TF_PLUGIN_CACHE_DIR"
 
@@ -81,7 +80,6 @@ EOF
             echo '❌ Pipeline failed. Check logs.'
         }
         always {
-            // Archive and cleanup directly (no node block needed)
             archiveArtifacts artifacts: '**/tf_outputs.json, **/public_ip.env', allowEmptyArchive: true
             cleanWs()
         }
