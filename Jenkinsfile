@@ -17,8 +17,7 @@ pipeline {
                                                   usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir(env.TF_DIR) {
-                        sh '''
-#!/bin/bash
+                        sh(script: '''
 set -euo pipefail
 
 export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
@@ -26,11 +25,11 @@ export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
 mkdir -p "$TF_PLUGIN_CACHE_DIR"
 export TF_LOG=INFO
-export TF_LOG_PATH=/dev/stdout   # Print logs to Jenkins console
+export TF_LOG_PATH=/dev/stdout
 
 echo "🔧 Initializing Terraform..."
 terraform init -input=false
-'''
+''', shell: '/bin/bash')
                     }
                 }
             }
@@ -42,8 +41,7 @@ terraform init -input=false
                                                   usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir(env.TF_DIR) {
-                        sh '''
-#!/bin/bash
+                        sh(script: '''
 set -euo pipefail
 
 export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
@@ -53,7 +51,7 @@ export TF_LOG=INFO
 export TF_LOG_PATH=/dev/stdout
 
 echo "🧠 Running Terraform Plan..."
-# Run plan with heartbeat to avoid Jenkins stale wrapper error
+# Run plan in background with heartbeat to prevent Jenkins stale wrapper error
 terraform plan -out=tfplan -input=false &
 PLAN_PID=$!
 while kill -0 $PLAN_PID >/dev/null 2>&1; do
@@ -61,7 +59,7 @@ while kill -0 $PLAN_PID >/dev/null 2>&1; do
     sleep 20
 done
 wait $PLAN_PID
-'''
+''', shell: '/bin/bash')
                     }
                 }
             }
@@ -74,8 +72,7 @@ wait $PLAN_PID
                                                   usernameVariable: 'AWS_ACCESS_KEY_ID',
                                                   passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir(env.TF_DIR) {
-                        sh '''
-#!/bin/bash
+                        sh(script: '''
 set -euo pipefail
 
 export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
@@ -97,7 +94,7 @@ if terraform output -raw public_ip >/dev/null 2>&1; then
 else
     echo "⚠️  No public_ip output found."
 fi
-'''
+''', shell: '/bin/bash')
                     }
                 }
             }
@@ -107,8 +104,7 @@ fi
             when { expression { fileExists('public_ip.env') } }
             steps {
                 sshagent(['deploy-key']) {
-                    sh '''
-#!/bin/bash
+                    sh(script: '''
 set -euo pipefail
 source public_ip.env
 
@@ -120,7 +116,7 @@ EOF
 
 echo "🚀 Running Ansible playbook on ${PUBLIC_IP}..."
 ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh-common-args='-o StrictHostKeyChecking=no'
-'''
+''', shell: '/bin/bash')
                 }
             }
         }
@@ -128,11 +124,10 @@ ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh
         stage('Report') {
             when { expression { fileExists('public_ip.env') } }
             steps {
-                sh '''
-#!/bin/bash
+                sh(script: '''
 source public_ip.env
 echo "🌐 Application should be available at: http://${PUBLIC_IP}"
-'''
+''', shell: '/bin/bash')
             }
         }
     }
