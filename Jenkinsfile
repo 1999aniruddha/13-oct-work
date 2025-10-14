@@ -81,11 +81,9 @@ EOF
             echo '❌ Pipeline failed. Check logs.'
         }
         always {
-            node {
-                // Only archive if file exists
-                archiveArtifacts artifacts: '**/tf_outputs.json, **/public_ip.env', allowEmptyArchive: true
-                cleanWs()
-            }
+            // Archive and cleanup directly (no node block needed)
+            archiveArtifacts artifacts: '**/tf_outputs.json, **/public_ip.env', allowEmptyArchive: true
+            cleanWs()
         }
     }
 }
