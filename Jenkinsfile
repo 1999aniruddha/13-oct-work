@@ -8,20 +8,26 @@ pipeline {
 
     stages {
         stage('Checkout') {
-            steps { checkout scm }
+            steps {
+                echo "📦 Checking out source code..."
+                git(
+                    url: 'https://github.com/1999aniruddha/13-oct-work.git',
+                    branch: 'main',
+                    credentialsId: 'GITHUB_TOKEN'
+                )
+            }
         }
 
         stage('Terraform Init') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
-                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                withCredentials([usernamePassword(
+                    credentialsId: 'AWS_CREDS',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
                     dir(env.TF_DIR) {
                         sh '''
-/bin/bash -c '
 set -euo pipefail
-export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
 mkdir -p "$TF_PLUGIN_CACHE_DIR"
 export TF_LOG=INFO
@@ -29,7 +35,6 @@ export TF_LOG_PATH=/dev/stdout
 
 echo "🔧 Initializing Terraform..."
 terraform init -input=false
-'
 '''
                     }
                 }
@@ -38,15 +43,14 @@ terraform init -input=false
 
         stage('Terraform Plan') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
-                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                withCredentials([usernamePassword(
+                    credentialsId: 'AWS_CREDS',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
                     dir(env.TF_DIR) {
                         sh '''
-/bin/bash -c '
 set -euo pipefail
-export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
 export TF_LOG=INFO
 export TF_LOG_PATH=/dev/stdout
@@ -59,7 +63,6 @@ while kill -0 $PLAN_PID >/dev/null 2>&1; do
     sleep 20
 done
 wait $PLAN_PID
-'
 '''
                     }
                 }
@@ -69,15 +72,14 @@ wait $PLAN_PID
         stage('Terraform Apply') {
             options { timeout(time: 30, unit: 'MINUTES') }
             steps {
-                withCredentials([usernamePassword(credentialsId: 'AWS_CREDS',
-                                                  usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                                  passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                withCredentials([usernamePassword(
+                    credentialsId: 'AWS_CREDS',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
                     dir(env.TF_DIR) {
                         sh '''
-/bin/bash -c '
 set -euo pipefail
-export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
 export TF_LOG=INFO
 export TF_LOG_PATH=/dev/stdout
@@ -95,7 +97,6 @@ if terraform output -raw public_ip >/dev/null 2>&1; then
 else
     echo "⚠️  No public_ip output found."
 fi
-'
 '''
                     }
                 }
@@ -107,7 +108,6 @@ fi
             steps {
                 sshagent(['deploy-key']) {
                     sh '''
-/bin/bash -c '
 set -euo pipefail
 source public_ip.env
 
@@ -119,7 +119,6 @@ EOF
 
 echo "🚀 Running Ansible playbook on ${PUBLIC_IP}..."
 ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh-common-args="-o StrictHostKeyChecking=no"
-'
 '''
                 }
             }
@@ -129,19 +128,22 @@ ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh
             when { expression { fileExists('public_ip.env') } }
             steps {
                 sh '''
-/bin/bash -c '
 source public_ip.env
 echo "🌐 Application should be available at: http://${PUBLIC_IP}"
-'
 '''
             }
         }
     }
 
     post {
-        success { echo '✅ Pipeline finished successfully.' }
-        failure { echo '❌ Pipeline failed. Check logs.' }
+        success {
+            echo '✅ Pipeline finished successfully.'
+        }
+        failure {
+            echo '❌ Pipeline failed. Check logs.'
+        }
         always {
+            echo '🧹 Cleaning workspace and archiving outputs...'
             archiveArtifacts artifacts: '**/terraform/tf_outputs.json, **/public_ip.env, **/terraform/terraform.log', allowEmptyArchive: true
             cleanWs()
         }
