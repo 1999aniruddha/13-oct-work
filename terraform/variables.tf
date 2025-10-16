@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "name" {
   description = "Name for resources"
   type        = string
-  default     = "ci-cd-web"
+  default     = "ci-cd-test"
 }
 
 variable "instance_type" {
