@@ -12,8 +12,8 @@ pipeline {
                 echo "📦 Checking out source code..."
                 git(
                     url: 'https://github.com/1999aniruddha/13-oct-work.git',
-                    branch: 'main',
-                    credentialsId: 'GITHUB_TOKEN'
+                    branch: 'main'
+                    // Remove credentialsId if repo is public
                 )
             }
         }
@@ -26,16 +26,18 @@ pipeline {
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
                     dir(env.TF_DIR) {
-                        sh '''
-set -euo pipefail
-export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
-mkdir -p "$TF_PLUGIN_CACHE_DIR"
-export TF_LOG=INFO
-export TF_LOG_PATH=/dev/stdout
+                        bat """
+@echo off
+REM Setting Terraform plugin cache directory
+set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
+if not exist "%TF_PLUGIN_CACHE_DIR%" mkdir "%TF_PLUGIN_CACHE_DIR%"
 
-echo "🔧 Initializing Terraform..."
+set TF_LOG=INFO
+set TF_LOG_PATH=%WORKSPACE%\\terraform.log
+
+echo 🔧 Initializing Terraform...
 terraform init -input=false
-'''
+"""
                     }
                 }
             }
@@ -49,21 +51,15 @@ terraform init -input=false
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
                     dir(env.TF_DIR) {
-                        sh '''
-set -euo pipefail
-export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
-export TF_LOG=INFO
-export TF_LOG_PATH=/dev/stdout
+                        bat """
+@echo off
+set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
+set TF_LOG=INFO
+set TF_LOG_PATH=%WORKSPACE%\\terraform.log
 
-echo "🧠 Running Terraform Plan..."
-terraform plan -out=tfplan -input=false &
-PLAN_PID=$!
-while kill -0 $PLAN_PID >/dev/null 2>&1; do
-    echo "⏳ Terraform plan still running..."
-    sleep 20
-done
-wait $PLAN_PID
-'''
+echo 🧠 Running Terraform Plan...
+terraform plan -out=tfplan -input=false
+"""
                     }
                 }
             }
@@ -78,26 +74,27 @@ wait $PLAN_PID
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
                     dir(env.TF_DIR) {
-                        sh '''
-set -euo pipefail
-export TF_PLUGIN_CACHE_DIR=$WORKSPACE/.terraform-plugin-cache
-export TF_LOG=INFO
-export TF_LOG_PATH=/dev/stdout
+                        bat """
+@echo off
+set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
+set TF_LOG=INFO
+set TF_LOG_PATH=%WORKSPACE%\\terraform.log
 
-echo "🚀 Applying Terraform changes..."
+echo 🚀 Applying Terraform changes...
 terraform apply -auto-approve -input=false tfplan
 
-echo "📤 Extracting Terraform outputs..."
-terraform output -json > tf_outputs.json || echo "{}" > tf_outputs.json
+echo 📤 Extracting Terraform outputs...
+terraform output -json > tf_outputs.json || echo {} > tf_outputs.json
 
-if terraform output -raw public_ip >/dev/null 2>&1; then
-    PUBLIC_IP=$(terraform output -raw public_ip)
-    echo "PUBLIC_IP=${PUBLIC_IP}" > "$WORKSPACE/public_ip.env"
-    echo "✅ Public IP captured: ${PUBLIC_IP}"
-else
-    echo "⚠️  No public_ip output found."
-fi
-'''
+REM Capture public IP if output exists
+for /f "delims=" %%i in ('terraform output -raw public_ip 2^>nul') do set PUBLIC_IP=%%i
+if defined PUBLIC_IP (
+    echo PUBLIC_IP=%PUBLIC_IP% > "%WORKSPACE%\\public_ip.env"
+    echo ✅ Public IP captured: %PUBLIC_IP%
+) else (
+    echo ⚠️ No public_ip output found.
+)
+"""
                     }
                 }
             }
@@ -107,19 +104,21 @@ fi
             when { expression { fileExists('public_ip.env') } }
             steps {
                 sshagent(['deploy-key']) {
-                    sh '''
-set -euo pipefail
-source public_ip.env
+                    bat """
+@echo off
+REM Load public IP
+for /f "tokens=1,2 delims==" %%i in (public_ip.env) do set %%i=%%j
 
-mkdir -p $ANSIBLE_DIR/inventory
-cat > $ANSIBLE_DIR/inventory/hosts.ini <<EOF
-[webservers]
-${PUBLIC_IP} ansible_user=ubuntu ansible_ssh_common_args="-o StrictHostKeyChecking=no"
-EOF
+REM Create inventory
+if not exist "%ANSIBLE_DIR%\\inventory" mkdir "%ANSIBLE_DIR%\\inventory"
+(
+echo [webservers]
+echo %PUBLIC_IP% ansible_user=ubuntu ansible_ssh_common_args="-o StrictHostKeyChecking=no"
+) > "%ANSIBLE_DIR%\\inventory\\hosts.ini"
 
-echo "🚀 Running Ansible playbook on ${PUBLIC_IP}..."
-ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh-common-args="-o StrictHostKeyChecking=no"
-'''
+echo 🚀 Running Ansible playbook on %PUBLIC_IP%...
+ansible-playbook -i "%ANSIBLE_DIR%\\inventory\\hosts.ini" "%ANSIBLE_DIR%\\site.yml" --ssh-common-args="-o StrictHostKeyChecking=no"
+"""
                 }
             }
         }
@@ -127,10 +126,11 @@ ansible-playbook -i $ANSIBLE_DIR/inventory/hosts.ini $ANSIBLE_DIR/site.yml --ssh
         stage('Report') {
             when { expression { fileExists('public_ip.env') } }
             steps {
-                sh '''
-source public_ip.env
-echo "🌐 Application should be available at: http://${PUBLIC_IP}"
-'''
+                bat """
+@echo off
+for /f "tokens=1,2 delims==" %%i in (public_ip.env) do set %%i=%%j
+echo 🌐 Application should be available at: http://%PUBLIC_IP%
+"""
             }
         }
     }
