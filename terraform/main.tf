@@ -51,11 +51,18 @@ resource "aws_instance" "web" {
   ami           = data.aws_ami.ubuntu.id
   instance_type = var.instance_type
   key_name      = var.key_name                # use existing key
-  security_groups = [aws_security_group.web_sg.name]
+
+  # ✅ Add this line to ensure the instance gets a public IP
+  associate_public_ip_address = true
+
+  # ✅ Use vpc_security_group_ids instead of security_groups
+  vpc_security_group_ids = [aws_security_group.web_sg.id]
+
   tags = {
     Name = var.name
   }
 }
+
 
 
 
