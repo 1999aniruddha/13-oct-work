@@ -4,6 +4,7 @@ pipeline {
     environment {
         TF_DIR = "terraform"
         ANSIBLE_DIR = "ansible"
+        AWS_REGION = "ap-south-1"  // ✅ Matches your Terraform setup
     }
 
     stages {
@@ -29,9 +30,14 @@ pipeline {
 @echo off
 set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
 if not exist "%TF_PLUGIN_CACHE_DIR%" mkdir "%TF_PLUGIN_CACHE_DIR%"
+set AWS_REGION=${AWS_REGION}
 
 echo 🔧 Initializing Terraform...
 terraform init -input=false
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Terraform Init failed!
+    exit /b 1
+)
 """
                     }
                 }
@@ -49,9 +55,14 @@ terraform init -input=false
                         bat """
 @echo off
 set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
+set AWS_REGION=${AWS_REGION}
 
 echo 🧠 Running Terraform Plan...
 terraform plan -out=tfplan -input=false
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Terraform Plan failed!
+    exit /b 1
+)
 """
                     }
                 }
@@ -67,39 +78,30 @@ terraform plan -out=tfplan -input=false
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
                     dir(env.TF_DIR) {
-                        // 👇 new logic added here
                         bat """
 @echo off
 set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
+set AWS_REGION=${AWS_REGION}
 setlocal enabledelayedexpansion
 
 echo 🚀 Applying Terraform changes...
 terraform apply -auto-approve -input=false tfplan > apply.log 2>&1
 set APPLY_EXIT_CODE=%ERRORLEVEL%
 
-REM --- Detect duplicate security group error or other known benign issues ---
-findstr /C:"InvalidGroup.Duplicate" apply.log >nul
-if %ERRORLEVEL%==0 (
-    echo ⚠️ Duplicate security group found — continuing without failure.
-    set APPLY_EXIT_CODE=0
-)
-
-REM --- Handle apply exit code ---
 if %APPLY_EXIT_CODE% NEQ 0 (
-    echo ❌ Terraform Apply failed. Check apply.log
-) else (
-    echo ✅ Terraform Apply succeeded or recovered.
+    echo ❌ Terraform Apply failed. See apply.log for details:
+    type apply.log
+    exit /b 1
 )
 
-REM --- Try extracting Terraform outputs regardless of apply result ---
-terraform output -json > tf_outputs.json 2>nul || echo {} > tf_outputs.json
+echo ✅ Terraform Apply completed successfully.
 
-REM Try getting public IP from Terraform output or AWS CLI if not found
+REM --- Extract public_ip output ---
 for /f "delims=" %%i in ('terraform output -raw public_ip 2^>nul') do set PUBLIC_IP=%%i
 
 if not defined PUBLIC_IP (
     echo ⚠️ No public_ip output from Terraform — trying AWS CLI...
-    aws ec2 describe-instances --filters "Name=tag:Name,Values=ci-cd-test" --query "Reservations[*].Instances[*].PublicIpAddress" --output text > temp_ip.txt 2>nul
+    aws ec2 describe-instances --region ${AWS_REGION} --filters "Name=tag:Name,Values=ci-cd-test" --query "Reservations[*].Instances[*].PublicIpAddress" --output text > temp_ip.txt 2>nul
     set /p PUBLIC_IP=<temp_ip.txt
 )
 
@@ -108,6 +110,7 @@ if defined PUBLIC_IP (
     echo ✅ Public IP captured: %PUBLIC_IP%
 ) else (
     echo ❌ No public IP found from Terraform or AWS.
+    exit /b 1
 )
 """
                     }
@@ -162,12 +165,13 @@ if defined PUBLIC_IP (
             echo '✅ Pipeline finished successfully.'
         }
         failure {
-            echo '❌ Pipeline failed. Check logs.'
+            echo '❌ Pipeline failed. Check logs and apply.log inside terraform folder.'
         }
         always {
             echo '🧹 Cleaning workspace and archiving outputs...'
-            archiveArtifacts artifacts: '**/terraform/tf_outputs.json, **/public_ip.env, **/terraform/terraform.log, **/terraform/apply.log', allowEmptyArchive: true
+            archiveArtifacts artifacts: '**/terraform/*.log, **/terraform/*.tfstate, **/public_ip.env', allowEmptyArchive: true
             cleanWs()
         }
     }
 }
+

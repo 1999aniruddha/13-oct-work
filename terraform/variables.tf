@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "AWS region"
+  description = "AWS region to deploy into"
   type        = string
   default     = "ap-south-1"
 }
@@ -19,6 +19,7 @@ variable "instance_type" {
 variable "key_name" {
   description = "Existing AWS key pair name"
   type        = string
-  default     = "mykey"   # 👈 your key name here
+  default     = "mykey"   # 👈 replace with your real AWS key name if different
 }
+
 
