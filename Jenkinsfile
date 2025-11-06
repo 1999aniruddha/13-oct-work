@@ -59,51 +59,49 @@ terraform plan -out=tfplan -input=false
         }
 
         stage('Terraform Apply') {
-            options { timeout(time: 30, unit: 'MINUTES') }
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'AWS_CREDS',
-                    usernameVariable: 'AWS_ACCESS_KEY_ID',
-                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                )]) {
-                    dir(env.TF_DIR) {
-                        bat """
+  options { timeout(time: 30, unit: 'MINUTES') }
+  steps {
+    withCredentials([usernamePassword(
+      credentialsId: 'AWS_CREDS',
+      usernameVariable: 'AWS_ACCESS_KEY_ID',
+      passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+    )]) {
+      dir(env.TF_DIR) {
+        bat """
 @echo off
 set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
-setlocal enabledelayedexpansion
+set APPLY_LOG=%WORKSPACE%\\terraform\\apply.log
 
 echo 🚀 Applying Terraform changes...
-terraform apply -auto-approve -input=false tfplan > apply.log 2>&1
+REM Run apply and capture exit code and full output (both stdout/stderr to console and file)
+terraform apply -auto-approve -input=false tfplan > "%APPLY_LOG%" 2>&1
 set APPLY_EXIT_CODE=%ERRORLEVEL%
 
-REM --- Detect duplicate security group error or other known benign issues ---
-findstr /C:"InvalidGroup.Duplicate" apply.log >nul
-if %ERRORLEVEL%==0 (
-    echo ⚠️ Duplicate security group found — continuing without failure.
-    set APPLY_EXIT_CODE=0
-)
+echo --- Begin apply.log ---
+type "%APPLY_LOG%"
+echo --- End apply.log ---
 
-REM --- Handle apply exit code ---
+REM If apply failed, print a helpful message and fail the step (non-zero exit code)
 if %APPLY_EXIT_CODE% NEQ 0 (
-    echo ❌ Terraform Apply failed. Check apply.log
-    exit /b %APPLY_EXIT_CODE%
-) else (
-    echo ✅ Terraform Apply succeeded or recovered.
+  echo ❌ Terraform apply returned exit code %APPLY_EXIT_CODE%. See apply.log above.
+  exit /b %APPLY_EXIT_CODE%
 )
 
-REM --- Save Terraform outputs to JSON ---
+echo ✅ Terraform Apply succeeded.
+REM Save outputs (if any)
 terraform output -json > tf_outputs.json 2>nul || echo {} > tf_outputs.json
 
-REM --- Extract private_ip or fallback to local loopback ---
-for /f "delims=" %%i in ('terraform output -raw private_ip 2^>nul') do set TARGET_IP=%%i
+REM Try to read private_ip output (if defined) and write to target_ip.env
+(for /f "delims=" %%i in ('terraform output -raw private_ip 2^>nul') do set TARGET_IP=%%i) || set TARGET_IP=
 if not defined TARGET_IP set TARGET_IP=127.0.0.1
 echo TARGET_IP=%TARGET_IP% > "%WORKSPACE%\\target_ip.env"
 echo ✅ Target IP captured: %TARGET_IP%
 """
-                    }
-                }
-            }
-        }
+      }
+    }
+  }
+}
+
 
         stage('Ansible Deploy') {
             steps {
