@@ -39,14 +39,26 @@ terraform init -input=false
         }
 
         stage('Terraform Plan') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'AWS_CREDS',
-                    usernameVariable: 'AWS_ACCESS_KEY_ID',
-                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                )]) {
-                    dir(env.TF_DIR) {
-                        bat """
+  steps {
+    withCredentials([usernamePassword(credentialsId: 'AWS_CREDS', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+      dir(env.TF_DIR) {
+        bat """
+@echo off
+set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
+
+echo 🧠 Running Terraform Plan...
+terraform plan -out=tfplan -input=false
+REM show plan summary
+terraform show -no-color tfplan > tfplan.txt 2>&1 || true
+echo --- Begin tfplan.txt ---
+type tfplan.txt
+echo --- End tfplan.txt ---
+"""
+      }
+    }
+  }
+}
+
 @echo off
 set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
 
