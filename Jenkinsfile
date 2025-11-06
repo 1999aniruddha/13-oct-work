@@ -91,8 +91,8 @@ echo ✅ Terraform Apply succeeded.
 REM Save outputs (if any)
 terraform output -json > tf_outputs.json 2>nul || echo {} > tf_outputs.json
 
-REM Try to read private_ip output (if defined) and write to target_ip.env
-(for /f "delims=" %%i in ('terraform output -raw private_ip 2^>nul') do set TARGET_IP=%%i) || set TARGET_IP=
+REM Try to read target_ip output (if defined) and write to target_ip.env
+(for /f "delims=" %%i in ('terraform output -raw target_ip 2^>nul') do set TARGET_IP=%%i) || set TARGET_IP=
 if not defined TARGET_IP set TARGET_IP=127.0.0.1
 echo TARGET_IP=%TARGET_IP% > "%WORKSPACE%\\target_ip.env"
 echo ✅ Target IP captured: %TARGET_IP%

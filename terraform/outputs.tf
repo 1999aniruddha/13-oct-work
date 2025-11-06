@@ -13,7 +13,7 @@ output "key_name" {
   value       = aws_instance.web.key_name
 }
 
-output "public_ip" {
+output "target_ip" {
   value = aws_instance.web.public_ip
 }
 
