@@ -67,7 +67,6 @@ terraform plan -out=tfplan -input=false
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
                     dir(env.TF_DIR) {
-                        // 👇 new logic added here
                         bat """
 @echo off
 set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
@@ -87,28 +86,19 @@ if %ERRORLEVEL%==0 (
 REM --- Handle apply exit code ---
 if %APPLY_EXIT_CODE% NEQ 0 (
     echo ❌ Terraform Apply failed. Check apply.log
+    exit /b %APPLY_EXIT_CODE%
 ) else (
     echo ✅ Terraform Apply succeeded or recovered.
 )
 
-REM --- Try extracting Terraform outputs regardless of apply result ---
+REM --- Save Terraform outputs to JSON ---
 terraform output -json > tf_outputs.json 2>nul || echo {} > tf_outputs.json
 
-REM Try getting public IP from Terraform output or AWS CLI if not found
-for /f "delims=" %%i in ('terraform output -raw public_ip 2^>nul') do set PUBLIC_IP=%%i
-
-if not defined PUBLIC_IP (
-    echo ⚠️ No public_ip output from Terraform — trying AWS CLI...
-    aws ec2 describe-instances --filters "Name=tag:Name,Values=ci-cd-test" --query "Reservations[*].Instances[*].PublicIpAddress" --output text > temp_ip.txt 2>nul
-    set /p PUBLIC_IP=<temp_ip.txt
-)
-
-if defined PUBLIC_IP (
-    echo PUBLIC_IP=%PUBLIC_IP% > "%WORKSPACE%\\public_ip.env"
-    echo ✅ Public IP captured: %PUBLIC_IP%
-) else (
-    echo ❌ No public IP found from Terraform or AWS.
-)
+REM --- Extract private_ip or fallback to local loopback ---
+for /f "delims=" %%i in ('terraform output -raw private_ip 2^>nul') do set TARGET_IP=%%i
+if not defined TARGET_IP set TARGET_IP=127.0.0.1
+echo TARGET_IP=%TARGET_IP% > "%WORKSPACE%\\target_ip.env"
+echo ✅ Target IP captured: %TARGET_IP%
 """
                     }
                 }
@@ -116,25 +106,24 @@ if defined PUBLIC_IP (
         }
 
         stage('Ansible Deploy') {
-            when { expression { fileExists('public_ip.env') } }
             steps {
                 sshagent(['deploy-key']) {
                     bat """
 @echo off
-for /f "tokens=1,2 delims==" %%i in (public_ip.env) do set %%i=%%j
+for /f "tokens=1,2 delims==" %%i in (target_ip.env) do set %%i=%%j
 
-if not defined PUBLIC_IP (
-    echo ❌ No PUBLIC_IP found, skipping Ansible.
+if not defined TARGET_IP (
+    echo ❌ No TARGET_IP found, skipping Ansible.
     exit /b 0
 )
 
 if not exist "%ANSIBLE_DIR%\\inventory" mkdir "%ANSIBLE_DIR%\\inventory"
 (
 echo [webservers]
-echo %PUBLIC_IP% ansible_user=ubuntu ansible_ssh_common_args="-o StrictHostKeyChecking=no"
+echo %TARGET_IP% ansible_user=ubuntu ansible_ssh_common_args="-o StrictHostKeyChecking=no"
 ) > "%ANSIBLE_DIR%\\inventory\\hosts.ini"
 
-echo 🚀 Running Ansible playbook on %PUBLIC_IP%...
+echo 🚀 Running Ansible playbook on %TARGET_IP%...
 ansible-playbook -i "%ANSIBLE_DIR%\\inventory\\hosts.ini" "%ANSIBLE_DIR%\\site.yml" --ssh-common-args="-o StrictHostKeyChecking=no"
 """
                 }
@@ -142,15 +131,14 @@ ansible-playbook -i "%ANSIBLE_DIR%\\inventory\\hosts.ini" "%ANSIBLE_DIR%\\site.y
         }
 
         stage('Report') {
-            when { expression { fileExists('public_ip.env') } }
             steps {
                 bat """
 @echo off
-for /f "tokens=1,2 delims==" %%i in (public_ip.env) do set %%i=%%j
-if defined PUBLIC_IP (
-    echo 🌐 Application should be available at: http://%PUBLIC_IP%
+for /f "tokens=1,2 delims==" %%i in (target_ip.env) do set %%i=%%j
+if defined TARGET_IP (
+    echo 🌐 Deployment completed on instance: %TARGET_IP%
 ) else (
-    echo ⚠️ No public IP found, skipping report.
+    echo ⚠️ No target IP found, skipping report.
 )
 """
             }
@@ -166,7 +154,7 @@ if defined PUBLIC_IP (
         }
         always {
             echo '🧹 Cleaning workspace and archiving outputs...'
-            archiveArtifacts artifacts: '**/terraform/tf_outputs.json, **/public_ip.env, **/terraform/terraform.log, **/terraform/apply.log', allowEmptyArchive: true
+            archiveArtifacts artifacts: '**/terraform/tf_outputs.json, **/target_ip.env, **/terraform/apply.log', allowEmptyArchive: true
             cleanWs()
         }
     }
