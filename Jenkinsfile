@@ -59,15 +59,15 @@ terraform plan -out=tfplan -input=false
         }
 
         stage('Terraform Apply') {
-  options { timeout(time: 30, unit: 'MINUTES') }
-  steps {
-    withCredentials([usernamePassword(
-      credentialsId: 'AWS_CREDS',
-      usernameVariable: 'AWS_ACCESS_KEY_ID',
-      passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-    )]) {
-      dir(env.TF_DIR) {
-        bat """
+            options { timeout(time: 30, unit: 'MINUTES') }
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'AWS_CREDS',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
+                    dir(env.TF_DIR) {
+                        bat """
 @echo off
 set TF_PLUGIN_CACHE_DIR=%WORKSPACE%\\.terraform-plugin-cache
 set APPLY_LOG=%WORKSPACE%\\terraform\\apply.log
@@ -91,21 +91,23 @@ echo ✅ Terraform Apply succeeded.
 REM Save outputs (if any)
 terraform output -json > tf_outputs.json 2>nul || echo {} > tf_outputs.json
 
-REM Try to read private_ip output (if defined) and write to target_ip.env
-(for /f "delims=" %%i in ('terraform output -raw private_ip 2^>nul') do set TARGET_IP=%%i) || set TARGET_IP=
+REM Try to read target_ip output (if defined) and write to target_ip.env
+(for /f "delims=" %%i in ('terraform output -raw target_ip 2^>nul') do set TARGET_IP=%%i) || set TARGET_IP=
 if not defined TARGET_IP set TARGET_IP=127.0.0.1
 echo TARGET_IP=%TARGET_IP% > "%WORKSPACE%\\target_ip.env"
 echo ✅ Target IP captured: %TARGET_IP%
 """
-      }
-    }
-  }
-}
-
+                    }
+                }
+            }
+        }
 
         stage('Ansible Deploy') {
             steps {
-                sshagent(['deploy-key']) {
+                withCredentials([sshUserPrivateKey(credentialsId: 'deploy-key',
+                                                   keyFileVariable: 'SSH_KEY_FILE',
+                                                   usernameVariable: 'SSH_USER')]) {
+                    echo "Using SSH user: ${SSH_USER}"
                     bat """
 @echo off
 for /f "tokens=1,2 delims==" %%i in (target_ip.env) do set %%i=%%j
@@ -115,14 +117,8 @@ if not defined TARGET_IP (
     exit /b 0
 )
 
-if not exist "%ANSIBLE_DIR%\\inventory" mkdir "%ANSIBLE_DIR%\\inventory"
-(
-echo [webservers]
-echo %TARGET_IP% ansible_user=ubuntu ansible_ssh_common_args="-o StrictHostKeyChecking=no"
-) > "%ANSIBLE_DIR%\\inventory\\hosts.ini"
-
-echo 🚀 Running Ansible playbook on %TARGET_IP%...
-ansible-playbook -i "%ANSIBLE_DIR%\\inventory\\hosts.ini" "%ANSIBLE_DIR%\\site.yml" --ssh-common-args="-o StrictHostKeyChecking=no"
+echo 🚀 Running Ansible Deploy through WSL...
+wsl ansible-playbook -i %TARGET_IP%, %ANSIBLE_DIR%/site.yml --private-key %SSH_KEY_FILE% -u %SSH_USER% -v
 """
                 }
             }
@@ -157,4 +153,3 @@ if defined TARGET_IP (
         }
     }
 }
-
