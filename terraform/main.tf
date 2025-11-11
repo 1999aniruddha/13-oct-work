@@ -50,7 +50,7 @@ resource "aws_security_group" "web_sg" {
 resource "aws_instance" "web" {
   ami           = data.aws_ami.ubuntu.id
   instance_type = var.instance_type
-  key_name      = var.key_name                # use existing key
+  key_name      = var.key_name # use existing key
 
   # ✅ Add this line to ensure the instance gets a public IP
   associate_public_ip_address = true
