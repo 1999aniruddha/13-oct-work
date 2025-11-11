@@ -1,6 +1,6 @@
 # ansible/site.yml
 - name: Configure web server and deploy app
-  hosts: webservers
+  hosts: all
   become: yes
   vars:
     app_src: "../app"
