@@ -118,7 +118,7 @@ if not defined TARGET_IP (
 )
 
 echo 🚀 Running Ansible Deploy through WSL...
-wsl ansible-playbook -i %TARGET_IP%, %ANSIBLE_DIR%/site.yml --private-key %SSH_KEY_FILE% -u %SSH_USER% -v
+wsl ansible-playbook -i "3.109.183.220", %ANSIBLE_DIR%/site.yml --key-file ~/Downloads/mykey.pem -u ubuntu -v
 """
                 }
             }
